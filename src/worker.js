@@ -10,21 +10,43 @@ import {
  */
 class TextGenerationPipeline {
   static model_id = "onnx-community/Phi-3.5-mini-instruct-onnx-web";
+  static instance = null;
 
   static async getInstance(progress_callback = null) {
-    this.tokenizer ??= AutoTokenizer.from_pretrained(this.model_id, {
-      progress_callback,
-    });
+    if (this.instance === null) {
+        // 1. 先載入 Tokenizer (不分裝置)
+        const tokenizer = await AutoTokenizer.from_pretrained(this.model_id);
+        let model;
 
-    this.model ??= AutoModelForCausalLM.from_pretrained(this.model_id, {
-      // dtype: "q4",
-      dtype: "q4f16",
-      device: "webgpu",
-      use_external_data_format: true,
-      progress_callback,
-    });
+        try {
+            // 2. 優先嘗試 WebGPU
+            console.log("🚀 嘗試啟動 WebGPU 加速...");
+            model = await AutoModelForCausalLM.from_pretrained(this.model_id, {
+                device: "webgpu", 
+                progress_callback,
+            });
+            console.log("✅ WebGPU 啟動成功！");
+        } catch (e) {
+            // 3. 失敗後自動回退到 CPU (wasm)
+            console.warn("⚠️ WebGPU 失敗，正在自動回退到 CPU (WASM) 模式...", e);
+            
+            // 這裡發送一個訊息回前端，讓 UI 顯示提示訊息
+            self.postMessage({ 
+                status: "info", 
+                data: "您的瀏覽器不支援 WebGPU，已切換至 CPU 模式（速度會較慢）。" 
+            });
 
-    return Promise.all([this.tokenizer, this.model]);
+            model = await AutoModelForCausalLM.from_pretrained(this.model_id, {
+                device: "wasm", // 使用 CPU 運算
+                dtype: "q4",    // 強制使用量化版本以減輕 CPU 負擔
+                progress_callback,
+            });
+            console.log("ℹ️ 已成功切換至 CPU 模式。");
+        }
+
+        this.instance = [tokenizer, model];
+    }
+    return this.instance;
   }
 }
 
@@ -98,7 +120,7 @@ async function generate(messages) {
     top_k: 3,
     temperature: 0.2, // 保持較低溫度以確保回答的一致性
 
-    max_new_tokens: 1024,
+    max_new_tokens: 512,
     streamer,
     stopping_criteria,
     return_dict_in_generate: true,

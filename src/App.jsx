@@ -5,7 +5,8 @@ import ArrowRightIcon from "./components/icons/ArrowRightIcon";
 import StopIcon from "./components/icons/StopIcon";
 import Progress from "./components/Progress";
 
-const IS_WEBGPU_AVAILABLE = !!navigator.gpu;
+const HAS_WEBGPU = !!navigator.gpu; // 偵測硬體是否真的支援
+const IS_WEBGPU_AVAILABLE = true;   // 強制設為 true，確保 UI 一定會渲染
 const STICKY_SCROLL_THRESHOLD = 120;
 const EXAMPLES = [
   "Give me some tips to improve my time management skills.",
@@ -186,8 +187,15 @@ function App() {
     }
   }, [messages, isRunning]);
 
-  return IS_WEBGPU_AVAILABLE ? (
+  return (
     <div className="flex flex-col h-screen mx-auto items justify-end text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-900">
+      
+      {/* 新增：如果沒有 WebGPU，在畫面最上方顯示一條黃色警告（可選） */}
+      {!HAS_WEBGPU && status === "ready" && (
+        <div className="bg-yellow-100 text-yellow-800 text-xs text-center py-1 font-medium">
+          ⚠️ 偵測不到 WebGPU，目前使用 CPU 模式運行，回覆速度將會較慢。
+        </div>
+      )}
       {status === null && messages.length === 0 && (
         <div className="h-full overflow-auto scrollbar-thin flex justify-center items-center flex-col relative">
           <div className="flex flex-col items-center mb-1 max-w-[300px] text-center">
@@ -264,7 +272,7 @@ function App() {
               }}
               disabled={status !== null || error !== null}
             >
-              Load model
+              {HAS_WEBGPU ? "啟動 AAA 客服系統 (GPU)" : "啟動 AAA 客服系統 (CPU)"}
             </button>
           </div>
         </div>
