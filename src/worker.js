@@ -9,44 +9,50 @@ import {
  * This class uses the Singleton pattern to enable lazy-loading of the pipeline
  */
 class TextGenerationPipeline {
-  static model_id = "onnx-community/Phi-3.5-mini-instruct-onnx-web";
-  static instance = null;
+    static model_id = "onnx-community/Phi-3.5-mini-instruct-onnx-web";
+    static instance = null;
 
-  static async getInstance(progress_callback = null) {
-    if (this.instance === null) {
-        // 1. 先載入 Tokenizer (不分裝置)
-        const tokenizer = await AutoTokenizer.from_pretrained(this.model_id);
-        let model;
+    static async getInstance(progress_callback = null) {
+        if (this.instance === null) {
+            const tokenizer = await AutoTokenizer.from_pretrained(this.model_id);
+            let model;
 
-        try {
-            // 2. 優先嘗試 WebGPU
-            console.log("🚀 嘗試啟動 WebGPU 加速...");
-            model = await AutoModelForCausalLM.from_pretrained(this.model_id, {
-                device: "webgpu", 
-                progress_callback,
-            });
-            console.log("✅ WebGPU 啟動成功！");
-            // 新增：回報給前端
-            self.postMessage({ status: "device_info", device: "WebGPU" });
-        } catch (e) {
-            // 3. 失敗後自動回退到 CPU (wasm)
-            console.warn("⚠️ WebGPU 失敗，正在自動回退到 CPU (WASM) 模式...", e);
-            
-            model = await AutoModelForCausalLM.from_pretrained(this.model_id, {
-                device: "wasm", // 使用 CPU 運算
-                dtype: "q4",    // 強制使用量化版本以減輕 CPU 負擔
-                progress_callback,
-            });
-            console.log("ℹ️ 已成功切換至 CPU 模式。");
-            
-            // 新增：回報給前端
-            self.postMessage({ status: "device_info", device: "CPU (WASM)" });
+            // 1. 安全檢查：確認環境中是否存在 navigator.gpu
+            const supportsWebGPU = typeof navigator !== 'undefined' && !!navigator.gpu;
+
+            if (supportsWebGPU) {
+                try {
+                    console.log("🚀 環境支援 WebGPU，嘗試啟動...");
+                    model = await AutoModelForCausalLM.from_pretrained(this.model_id, {
+                        device: "webgpu",
+                        progress_callback,
+                    });
+                    console.log("✅ WebGPU 啟動成功！");
+                    self.postMessage({ status: "device_info", device: "WebGPU" });
+                } catch (e) {
+                    console.warn("⚠️ WebGPU 載入失敗，準備回退到 WASM...", e);
+                    model = await this.loadWasmModel(progress_callback);
+                }
+            } else {
+                // 2. 如果完全不支援 WebGPU，直接執行 CPU 模式
+                console.log("ℹ️ 環境不支持 WebGPU，直接使用 CPU 模式。");
+                model = await this.loadWasmModel(progress_callback);
+            }
+
+            this.instance = [tokenizer, model];
         }
-
-        this.instance = [tokenizer, model];
+        return this.instance;
     }
-    return this.instance;
-  }
+
+    // 抽離 WASM 載入邏輯以保持程式碼乾淨
+    static async loadWasmModel(progress_callback) {
+        self.postMessage({ status: "device_info", device: "CPU (WASM)" });
+        return await AutoModelForCausalLM.from_pretrained(this.model_id, {
+            device: "wasm",
+            dtype: "q4", // CPU 模式務必使用量化版，否則會極慢且容易當機
+            progress_callback,
+        });
+    }
 }
 
 const stopping_criteria = new InterruptableStoppingCriteria();
@@ -139,15 +145,19 @@ async function generate(messages) {
 
 async function check() {
   try {
-    const adapter = await navigator.gpu.requestAdapter();
-    if (!adapter) {
-      throw new Error("WebGPU is not supported (no adapter found)");
+    // 先檢查 navigator.gpu 是否存在
+    if (typeof navigator !== 'undefined' && navigator.gpu) {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (adapter) {
+        console.log("🚀 Check: WebGPU 準備就緒");
+        return; // 正常退出，不做任何錯誤回報
+      }
     }
+    // 如果走到這，代表不支援 WebGPU
+    console.warn("ℹ️ Check: 此環境不支援 WebGPU，將自動使用 CPU 模式。");
   } catch (e) {
-    self.postMessage({
-      status: "error",
-      data: e.toString(),
-    });
+    // 只有發生真正的程式邏輯錯誤才回報
+    console.error("Check Error:", e);
   }
 }
 
