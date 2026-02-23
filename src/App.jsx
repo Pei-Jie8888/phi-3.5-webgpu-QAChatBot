@@ -5,7 +5,7 @@ import ArrowRightIcon from "./components/icons/ArrowRightIcon";
 import StopIcon from "./components/icons/StopIcon";
 import Progress from "./components/Progress";
 
-// 這裡我們只偵測硬體，但不做強制阻擋
+// 這些常數可以放在外面
 const HAS_WEBGPU = !!navigator.gpu;
 const STICKY_SCROLL_THRESHOLD = 120;
 const EXAMPLES = [
@@ -15,6 +15,10 @@ const EXAMPLES = [
 ];
 
 function App() {
+  // --- 關鍵修正：將 useState 移入 App 函式內部 ---
+  const [activeDevice, setActiveDevice] = useState(null); 
+  // ------------------------------------------
+
   const worker = useRef(null);
   const textareaRef = useRef(null);
   const chatContainerRef = useRef(null);
@@ -63,6 +67,9 @@ function App() {
 
     const onMessageReceived = (e) => {
       switch (e.data.status) {
+        case "device_info":
+          setActiveDevice(e.data.device);
+          break;
         case "loading":
           setStatus("loading");
           setLoadingMessage(e.data.data);
@@ -125,35 +132,42 @@ function App() {
     }
   }, [messages, isRunning]);
 
-  // 直接回傳 UI，不再使用三元運算子阻擋
   return (
     <div className="flex flex-col h-screen mx-auto items justify-end text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-900">
       
-      {/* 頂部警告列：僅在無 GPU 且模型就緒時顯示 */}
-      {!HAS_WEBGPU && status === "ready" && (
-        <div className="bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 text-xs text-center py-2 font-medium border-b border-yellow-500/20">
-          ⚠️ 偵測不到 WebGPU 環境，目前使用 CPU 模式運行，回覆速度將會較慢。
+      {/* 頂部狀態與警告區域 */}
+      {status === "ready" && (
+        <div className="w-full flex flex-col">
+          <div className="flex justify-center items-center py-1.5 gap-2 border-b dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50">
+            <span className="text-[10px] uppercase tracking-widest text-gray-400 font-bold">目前運算裝置:</span>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
+              activeDevice === "WebGPU" 
+                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" 
+                : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+            }`}>
+              {activeDevice || "偵測中..."}
+            </span>
+          </div>
+
+          {activeDevice === "CPU (WASM)" && (
+            <div className="bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 text-xs text-center py-2.5 font-medium border-b border-yellow-500/20">
+              ⚠️ 偵測不到 WebGPU 環境，目前使用 CPU 模式運行，回覆速度將會較慢。
+            </div>
+          )}
         </div>
       )}
 
       {/* 初始載入畫面 */}
       {status === null && messages.length === 0 && (
-        <div className="h-full overflow-auto flex justify-center items-center flex-col p-4">
-          <div className="flex flex-col items-center mb-6 max-w-[400px] text-center">
-            <img src="logo.png" width="120px" height="auto" className="mb-4" alt="AAA Logo" />
-            <h1 className="text-3xl font-bold mb-2">AAA 智能客服</h1>
-            <p className="text-gray-500 dark:text-gray-400">
-              歡迎使用 AAA 智慧家居助手。本系統直接在您的瀏覽器中運行，確保您的對話隱私不外洩。
-            </p>
-          </div>
+        <div className="h-full overflow-auto flex justify-center items-center flex-col p-4 text-center">
+          <img src="logo.png" width="120px" height="auto" className="mb-4" alt="AAA Logo" />
+          <h1 className="text-3xl font-bold mb-2">AAA 智能客服</h1>
+          <p className="text-gray-500 dark:text-gray-400 max-w-[400px] mb-6">
+            歡迎使用 AAA 智慧家居助手。本系統直接在您的瀏覽器中運行，確保您的對話隱私不外洩。
+          </p>
 
           <div className="flex flex-col items-center w-full max-w-[500px]">
-            {error && (
-              <div className="text-red-500 text-center mb-4 bg-red-50 p-3 rounded-lg w-full text-sm">
-                載入失敗：{error}
-              </div>
-            )}
-
+            {error && <div className="text-red-500 mb-4 bg-red-50 p-3 rounded-lg text-sm w-full">{error}</div>}
             <button
               className="w-full max-w-[280px] border px-6 py-3 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 transition-all shadow-lg font-medium"
               onClick={() => {
@@ -184,7 +198,7 @@ function App() {
         <div ref={chatContainerRef} className="overflow-y-auto scrollbar-thin w-full flex flex-col items-center h-full">
           <Chat messages={messages} />
           {messages.length === 0 && (
-            <div className="flex flex-col items-center gap-2 mt-auto mb-8">
+            <div className="flex flex-col items-center gap-2 mt-auto mb-8 text-center">
               <p className="text-sm text-gray-400 mb-2">您可以試著問我：</p>
               <div className="flex flex-wrap justify-center gap-2 px-4">
                 {EXAMPLES.map((msg, i) => (
@@ -200,7 +214,6 @@ function App() {
             </div>
           )}
           
-          {/* 生成速度統計 */}
           <div className="text-[10px] text-gray-400 mb-2">
             {tps && messages.length > 0 && (
               <span>

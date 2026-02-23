@@ -26,22 +26,21 @@ class TextGenerationPipeline {
                 progress_callback,
             });
             console.log("✅ WebGPU 啟動成功！");
+            // 新增：回報給前端
+            self.postMessage({ status: "device_info", device: "WebGPU" });
         } catch (e) {
             // 3. 失敗後自動回退到 CPU (wasm)
             console.warn("⚠️ WebGPU 失敗，正在自動回退到 CPU (WASM) 模式...", e);
             
-            // 這裡發送一個訊息回前端，讓 UI 顯示提示訊息
-            self.postMessage({ 
-                status: "info", 
-                data: "您的瀏覽器不支援 WebGPU，已切換至 CPU 模式（速度會較慢）。" 
-            });
-
             model = await AutoModelForCausalLM.from_pretrained(this.model_id, {
                 device: "wasm", // 使用 CPU 運算
                 dtype: "q4",    // 強制使用量化版本以減輕 CPU 負擔
                 progress_callback,
             });
             console.log("ℹ️ 已成功切換至 CPU 模式。");
+            
+            // 新增：回報給前端
+            self.postMessage({ status: "device_info", device: "CPU (WASM)" });
         }
 
         this.instance = [tokenizer, model];
