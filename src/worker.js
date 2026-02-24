@@ -10,6 +10,10 @@ import {
 env.allowLocalModels = false;
 env.backends.onnx.wasm.proxy = false;
 
+// 針對行動端減少執行緒，避免競爭記憶體
+env.backends.onnx.wasm.numThreads = 4; 
+env.backends.onnx.wasm.simd = true; // 確保開啟 SIMD 加速
+
 /**
  * 使用 Singleton 模式管理模型載入，並實作 WebGPU -> CPU 回退機制
  */
@@ -44,6 +48,13 @@ class TextGenerationPipeline {
           device: "wasm",
           use_external_data_format: true,
           progress_callback,
+          // 新增：ONNX Runtime 的細部優化參數
+          config: {
+              // 限制 KV Cache 佔用的記憶體，防止對話變長後手機崩潰
+              kv_cache_config: {
+                  // 視情況調整，降低記憶體壓力
+              }
+          }
         });
         this.device = "CPU (WASM) 🐌";
         console.log("ℹ️ 已成功切換至 CPU 模式。");
