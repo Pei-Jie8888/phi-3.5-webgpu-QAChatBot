@@ -3,26 +3,47 @@ import {
   AutoModelForCausalLM,
   TextStreamer,
   InterruptableStoppingCriteria,
+  env, // 新增：引入環境設定
 } from "@huggingface/transformers";
+
+// 設定環境
+env.allowLocalModels = false;
+// 如果要在 CPU 順利執行，有時需要關閉 proxy
+env.backends.onnx.wasm.proxy = false;
 
 /**
  * This class uses the Singleton pattern to enable lazy-loading of the pipeline
  */
 class TextGenerationPipeline {
   static model_id = "onnx-community/Phi-3.5-mini-instruct-onnx-web";
+  static device = "webgpu"; // 預設
 
   static async getInstance(progress_callback = null) {
     this.tokenizer ??= AutoTokenizer.from_pretrained(this.model_id, {
       progress_callback,
     });
 
-    this.model ??= AutoModelForCausalLM.from_pretrained(this.model_id, {
-      // dtype: "q4",
-      dtype: "q4f16",
-      device: "webgpu",
-      use_external_data_format: true,
-      progress_callback,
-    });
+    if (!this.model) {
+      try {
+        console.log("🚀 嘗試啟動 WebGPU...");
+        this.model = await AutoModelForCausalLM.from_pretrained(this.model_id, {
+          dtype: "q4f16", // GPU 偏好 f16
+          device: "webgpu",
+          use_external_data_format: true,
+          progress_callback,
+        });
+        this.device = "WebGPU 🚀";
+      } catch (e) {
+        console.warn("⚠️ WebGPU 失敗，正在回退至 CPU (WASM)...", e);
+        this.model = await AutoModelForCausalLM.from_pretrained(this.model_id, {
+          dtype: "q4", // CPU 通常對 f32 (q4) 支援度較好
+          device: "wasm",
+          use_external_data_format: true,
+          progress_callback,
+        });
+        this.device = "CPU (WASM) 🐌";
+      }
+    }
 
     return Promise.all([this.tokenizer, this.model]);
   }
@@ -151,7 +172,11 @@ async function load() {
   // Run model with dummy input to compile shaders
   const inputs = tokenizer("a");
   await model.generate({ ...inputs, max_new_tokens: 1 });
-  self.postMessage({ status: "ready" });
+  // 修改：回傳目前最終使用的 device
+  self.postMessage({ 
+    status: "ready", 
+    device: TextGenerationPipeline.device 
+  });
 }
 // Listen for messages from the main thread
 self.addEventListener("message", async (e) => {
