@@ -143,7 +143,7 @@ async function generate(messages) {
     do_sample: true,
     top_k: 3,
     temperature: 0.2,
-    max_new_tokens: 1024,
+    max_new_tokens: 512,
     streamer,
     stopping_criteria,
     return_dict_in_generate: true,
