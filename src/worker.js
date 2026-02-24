@@ -28,13 +28,14 @@ class TextGenerationPipeline {
   // static model_id = "onnx-community/Phi-3-mini-4k-instruct-ONNX";
   // static use_external_data_format = true;
 
-  // 效果普普 1.01 GB
-  static model_id = "onnx-community/Llama-3.2-1B-Instruct-ONNX";
-  static use_external_data_format = true;
+  // 效果普普 1.01 GB，但手機跑得動
+  // static model_id = "onnx-community/Llama-3.2-1B-Instruct-ONNX";
+  // static use_external_data_format = true;
 
   // 輕量化模型 (效果不好)
-  // static model_id = "onnx-community/Qwen2.5-0.5B-Instruct";
-  // static use_external_data_format = false;
+  static model_id = "onnx-community/Qwen2.5-0.5B-Instruct";
+  static use_external_data_format = false;
+
   // =======================================================================
 
   static model = null;
@@ -51,7 +52,7 @@ class TextGenerationPipeline {
     if (!this.model) {
       // 統一的設定物件
       const model_options = {
-        dtype: "q4f16", 
+        dtype: "q4",  // q4f16
         use_external_data_format: this.use_external_data_format, // 使用動態設定
         progress_callback,
       };
@@ -79,15 +80,20 @@ class TextGenerationPipeline {
 const stopping_criteria = new InterruptableStoppingCriteria();
 
 // --- 公司資訊設定 ---
-const SYSTEM_PROMPT = `你現在是 AAA 公司的專業客服機器人。請根據以下公司資訊回答客戶問題。如果問題不在資訊範圍內，請客氣地請客戶撥打客服專線。
+const SYSTEM_PROMPT = `你是「AAA公司」的專業客服。
+請嚴格遵守以下規則：
+1. 僅根據【公司資料】回答。
+2. 若資料未提及，請回答「請撥打專線 02-8765-4321 由專人為您服務。」。
+3. 必須使用『繁體中文』。
 
-【公司資訊】
-- 退貨政策：AAA 提供 7 天鑑賞期。商品須保持全新、未拆封且包裝完整即可申請全額退款。若商品有瑕疵，請於收到後 24 小時內聯繫客服。
-- 聯繫方式：您可以透過電子郵件 support@aaa.com 或撥打客服專線 02-8765-4321 與我們聯絡。服務時間為週一至週五 09:00 - 18:00。
-- 運送資訊：一般訂單在下單後 2 個工作天內出貨，配送時間約 3-5 天。
-- 公司簡介：AAA 是一家專注於提供高品質智慧家居解決方案的科技公司，致力於讓科技更有溫度。
+【公司資料】
+* 公司簡介：AAA 是一家專注於提供高品質智慧家居解決方案的科技公司，致力於讓科技更有溫度。
+* 退貨政策：7天鑑賞期（全新未拆）；瑕疵請於24小時內聯繫。
+* 客服聯絡：電子郵件 support@aaa.com / 客服專線 02-8765-4321。
+* 服務時間：週一至週五 09:00 - 18:00。
+* 運送資訊：下單後 2 個工作天內出貨，配送時間約 3-5 天。
 
-請用親切、專業且簡潔的繁體中文回答。`;
+請簡短回答。`;
 
 let past_key_values_cache = null;
 
@@ -140,10 +146,10 @@ async function generate(messages) {
   const { past_key_values, sequences } = await model.generate({
     ...inputs,
     // past_key_values: past_key_values_cache, // 視模型相容性開啟
-    do_sample: true,
-    top_k: 3,
-    temperature: 0.2,
-    max_new_tokens: 512,
+    do_sample: false,
+    // top_k: 3,
+    temperature: 0,
+    max_new_tokens: 256,
     streamer,
     stopping_criteria,
     return_dict_in_generate: true,
