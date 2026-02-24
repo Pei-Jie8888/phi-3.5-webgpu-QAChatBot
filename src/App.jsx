@@ -1,62 +1,62 @@
 import { useEffect, useState, useRef } from "react";
-
 import Chat from "./components/Chat";
 import ArrowRightIcon from "./components/icons/ArrowRightIcon";
 import StopIcon from "./components/icons/StopIcon";
 import Progress from "./components/Progress";
 
-// 這些常數可以放在外面
-const HAS_WEBGPU = !!navigator.gpu;
+// 僅作為 UI 提示參考，不再強制阻擋渲染
+const IS_WEBGPU_AVAILABLE = !!navigator.gpu;
 const STICKY_SCROLL_THRESHOLD = 120;
 const EXAMPLES = [
-  "請問如何申請退貨？",
-  "滿多少元可以免運？",
-  "你們的客服電話是多少？",
+  "Give me some tips to improve my time management skills.",
+  "What is the difference between AI and ML?",
+  "Write python code to compute the nth fibonacci number.",
 ];
 
 function App() {
-  // --- 關鍵修正：將 useState 移入 App 函式內部 ---
-  const [activeDevice, setActiveDevice] = useState(null); 
-  // ------------------------------------------
-
+  // Worker 引用
   const worker = useRef(null);
   const textareaRef = useRef(null);
   const chatContainerRef = useRef(null);
 
+  // 狀態管理
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const [loadingMessage, setLoadingMessage] = useState("");
   const [progressItems, setProgressItems] = useState([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [device, setDevice] = useState(null); // 新增：儲存目前使用的設備名稱
 
+  // 輸入與對話資料
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [tps, setTps] = useState(null);
   const [numTokens, setNumTokens] = useState(null);
 
+  // 處理訊息發送
   function onEnter(message) {
+    if (!message.trim()) return;
     setMessages((prev) => [...prev, { role: "user", content: message }]);
     setTps(null);
     setIsRunning(true);
     setInput("");
   }
 
+  // 處理中斷生成
   function onInterrupt() {
     worker.current.postMessage({ type: "interrupt" });
   }
 
+  // 文字框高度自適應
   useEffect(() => {
-    resizeInput();
-  }, [input]);
-
-  function resizeInput() {
     if (!textareaRef.current) return;
     const target = textareaRef.current;
     target.style.height = "auto";
     const newHeight = Math.min(Math.max(target.scrollHeight, 24), 200);
     target.style.height = `${newHeight}px`;
-  }
+  }, [input]);
 
+  // 初始化 Worker 並設置監聽器
   useEffect(() => {
     if (!worker.current) {
       worker.current = new Worker(new URL("./worker.js", import.meta.url), {
@@ -67,9 +67,6 @@ function App() {
 
     const onMessageReceived = (e) => {
       switch (e.data.status) {
-        case "device_info":
-          setActiveDevice(e.data.device);
-          break;
         case "loading":
           setStatus("loading");
           setLoadingMessage(e.data.data);
@@ -87,6 +84,7 @@ function App() {
           break;
         case "ready":
           setStatus("ready");
+          setDevice(e.data.device); // 接收來自 Worker 的設備資訊
           break;
         case "start":
           setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
@@ -117,15 +115,15 @@ function App() {
     return () => worker.current.removeEventListener("message", onMessageReceived);
   }, []);
 
+  // 當訊息更新時觸發生成
   useEffect(() => {
-    if (messages.filter((x) => x.role === "user").length === 0) return;
-    if (messages.at(-1).role === "assistant") return;
-    setTps(null);
+    if (messages.length === 0 || messages.at(-1).role === "assistant") return;
     worker.current.postMessage({ type: "generate", data: messages });
-  }, [messages, isRunning]);
+  }, [messages]);
 
+  // 自動捲動聊天內容
   useEffect(() => {
-    if (!chatContainerRef.current || !isRunning) return;
+    if (!chatContainerRef.current) return;
     const element = chatContainerRef.current;
     if (element.scrollHeight - element.scrollTop - element.clientHeight < STICKY_SCROLL_THRESHOLD) {
       element.scrollTop = element.scrollHeight;
@@ -133,134 +131,152 @@ function App() {
   }, [messages, isRunning]);
 
   return (
-    <div className="flex flex-col h-screen mx-auto items justify-end text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-900">
+    <div className="flex flex-col h-screen mx-auto text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-900 transition-colors">
       
-      {/* 頂部狀態與警告區域 */}
-      {status === "ready" && (
-        <div className="w-full flex flex-col">
-          <div className="flex justify-center items-center py-1.5 gap-2 border-b dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50">
-            <span className="text-[10px] uppercase tracking-widest text-gray-400 font-bold">目前運算裝置:</span>
-            <span className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-              activeDevice === "WebGPU" 
-                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" 
-                : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-            }`}>
-              {activeDevice || "偵測中..."}
-            </span>
+      {/* 1. 初始畫面 (未載入模型) */}
+      {status === null && messages.length === 0 && (
+        <div className="h-full flex flex-col justify-center items-center p-4">
+          <div className="flex flex-col items-center mb-6 max-w-[400px] text-center">
+            <img src="logo.png" width="120" height="auto" className="mb-4" alt="Phi Logo" />
+            <h1 className="text-4xl font-bold mb-2">Phi-3.5 WebGPU</h1>
+            <p className="font-medium opacity-80">
+              私密且強大的本地 AI 客服
+              <br />
+              直接在您的瀏覽器運行
+            </p>
           </div>
 
-          {activeDevice === "CPU (WASM)" && (
-            <div className="bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 text-xs text-center py-2.5 font-medium border-b border-yellow-500/20">
-              ⚠️ 偵測不到 WebGPU 環境，目前使用 CPU 模式運行，回覆速度將會較慢。
-            </div>
-          )}
-        </div>
-      )}
+          <div className="max-w-[500px] text-center space-y-4 text-sm">
+            <p>
+              您即將載入約 2.3 GB 的 Phi-3.5 模型。下載後將儲存於瀏覽器快取中。
+              <br />
+              {!IS_WEBGPU_AVAILABLE && (
+                <span className="text-orange-500 block mt-2 font-bold">
+                  ⚠️ 偵測到環境不支援 WebGPU，將自動回退至 CPU (WASM) 模式。
+                </span>
+              )}
+            </p>
 
-      {/* 初始載入畫面 */}
-      {status === null && messages.length === 0 && (
-        <div className="h-full overflow-auto flex justify-center items-center flex-col p-4 text-center">
-          <img src="logo.png" width="120px" height="auto" className="mb-4" alt="AAA Logo" />
-          <h1 className="text-3xl font-bold mb-2">AAA 智能客服</h1>
-          <p className="text-gray-500 dark:text-gray-400 max-w-[400px] mb-6">
-            歡迎使用 AAA 智慧家居助手。本系統直接在您的瀏覽器中運行，確保您的對話隱私不外洩。
-          </p>
+            {error && (
+              <div className="p-3 bg-red-100 text-red-700 rounded-lg">
+                載入失敗: {error}
+              </div>
+            )}
 
-          <div className="flex flex-col items-center w-full max-w-[500px]">
-            {error && <div className="text-red-500 mb-4 bg-red-50 p-3 rounded-lg text-sm w-full">{error}</div>}
             <button
-              className="w-full max-w-[280px] border px-6 py-3 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 transition-all shadow-lg font-medium"
+              className="px-8 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 disabled:bg-gray-400 transition-all shadow-lg"
               onClick={() => {
                 worker.current.postMessage({ type: "load" });
                 setStatus("loading");
               }}
               disabled={status !== null || error !== null}
             >
-              {HAS_WEBGPU ? "啟動客服系統 (GPU 加速)" : "啟動客服系統 (CPU 模式)"}
+              啟動模型
             </button>
-            <p className="mt-4 text-[11px] text-gray-400">首次啟動將下載約 2.3GB 的 AI 組件</p>
           </div>
         </div>
       )}
 
-      {/* 下載進度畫面 */}
+      {/* 2. 載入狀態 (顯示進度條) */}
       {status === "loading" && (
-        <div className="w-full max-w-[500px] mx-auto p-6 mt-auto mb-auto">
-          <p className="text-center mb-4 font-medium text-blue-600 animate-pulse">{loadingMessage}</p>
-          {progressItems.map(({ file, progress, total }, i) => (
-            <Progress key={i} text={file} percentage={progress} total={total} />
-          ))}
+        <div className="h-full flex flex-col justify-center items-center w-full max-w-[500px] mx-auto px-6">
+          <p className="mb-4 text-lg font-medium animate-pulse">{loadingMessage}</p>
+          <div className="w-full space-y-2">
+            {progressItems.map(({ file, progress, total }, i) => (
+              <Progress key={i} text={file} percentage={progress} total={total} />
+            ))}
+          </div>
         </div>
       )}
 
-      {/* 聊天對話區塊 */}
+      {/* 3. 聊天主畫面 (Ready) */}
       {status === "ready" && (
-        <div ref={chatContainerRef} className="overflow-y-auto scrollbar-thin w-full flex flex-col items-center h-full">
+        <div ref={chatContainerRef} className="flex-1 overflow-y-auto scrollbar-thin flex flex-col items-center pt-4">
+          
+          {/* 設備資訊顯示標籤 */}
+          <div className="sticky top-0 z-10 mb-4 px-4 py-1.5 rounded-full text-[11px] font-bold tracking-widest bg-white/80 dark:bg-gray-900/80 backdrop-blur border dark:border-gray-700 shadow-sm">
+            STATUS: <span className={device?.includes("GPU") ? "text-green-500" : "text-orange-500"}>{device}</span>
+          </div>
+
           <Chat messages={messages} />
+
+          {/* 範例問題區塊 */}
           {messages.length === 0 && (
-            <div className="flex flex-col items-center gap-2 mt-auto mb-8 text-center">
-              <p className="text-sm text-gray-400 mb-2">您可以試著問我：</p>
-              <div className="flex flex-wrap justify-center gap-2 px-4">
-                {EXAMPLES.map((msg, i) => (
-                  <button
-                    key={i}
-                    className="px-4 py-2 border dark:border-gray-700 rounded-full bg-gray-50 dark:bg-gray-800 text-sm hover:bg-gray-100 transition-colors"
-                    onClick={() => onEnter(msg)}
-                  >
-                    {msg}
-                  </button>
-                ))}
-              </div>
+            <div className="flex flex-col gap-2 mt-8 w-full max-w-[600px] px-4">
+              <p className="text-center text-gray-400 text-sm mb-2">試試看詢問以下問題：</p>
+              {EXAMPLES.map((msg, i) => (
+                <button
+                  key={i}
+                  className="text-left border dark:border-gray-700 rounded-xl p-3 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+                  onClick={() => onEnter(msg)}
+                >
+                  {msg}
+                </button>
+              ))}
             </div>
           )}
-          
-          <div className="text-[10px] text-gray-400 mb-2">
+
+          {/* 生成效能資訊顯示 */}
+          <div className="text-center text-xs text-gray-500 dark:text-gray-400 my-4 h-6">
             {tps && messages.length > 0 && (
-              <span>
-                生成速度: {tps.toFixed(2)} tokens/sec
+              <p>
+                {!isRunning && `完成 ${numTokens} 個 Token | `}
+                速度：<span className="font-bold text-gray-800 dark:text-gray-100">{tps.toFixed(2)} tokens/sec</span>
                 {!isRunning && (
-                  <span className="ml-2 underline cursor-pointer" onClick={() => {
-                    worker.current.postMessage({ type: "reset" });
-                    setMessages([]);
-                  }}>重設對話</span>
+                  <button 
+                    className="ml-2 underline hover:text-blue-500" 
+                    onClick={() => { worker.current.postMessage({ type: "reset" }); setMessages([]); }}
+                  >
+                    重置對話
+                  </button>
                 )}
-              </span>
+              </p>
             )}
           </div>
         </div>
       )}
 
-      {/* 輸入區塊 */}
-      <div className="mt-2 border dark:border-gray-700 dark:bg-gray-800 rounded-2xl w-[600px] max-w-[92%] mx-auto relative mb-4 flex shadow-sm bg-white">
-        <textarea
-          ref={textareaRef}
-          className="w-full px-4 py-4 rounded-2xl bg-transparent border-none outline-none text-gray-800 dark:text-gray-100 placeholder-gray-400 resize-none disabled:cursor-not-allowed"
-          placeholder="輸入您的訊息..."
-          rows={1}
-          value={input}
-          disabled={status !== "ready"}
-          onKeyDown={(e) => {
-            if (input.length > 0 && !isRunning && e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              onEnter(input);
-            }
-          }}
-          onInput={(e) => setInput(e.target.value)}
-        />
-        <div className="flex items-end p-2">
-          {isRunning ? (
-            <button onClick={onInterrupt} className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700">
-              <StopIcon className="h-5 w-5 text-red-500" />
-            </button>
-          ) : (
-            <button 
-              onClick={() => input.length > 0 && onEnter(input)}
-              className={`p-2 rounded-lg transition-colors ${input.length > 0 ? "bg-blue-600 text-white" : "text-gray-300"}`}
-            >
-              <ArrowRightIcon className="h-5 w-5" />
-            </button>
-          )}
+      {/* 4. 固定在底部的輸入區域 */}
+      <div className="p-4 border-t dark:border-gray-800 bg-white dark:bg-gray-900">
+        <div className="max-w-[800px] mx-auto relative flex items-end gap-2 bg-gray-100 dark:bg-gray-800 p-2 rounded-2xl shadow-inner border dark:border-gray-700">
+          <textarea
+            ref={textareaRef}
+            className="flex-1 bg-transparent px-3 py-2 outline-none text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none min-h-[44px] max-h-[200px]"
+            placeholder={status === "ready" ? "輸入您的問題..." : "模型準備中..."}
+            rows={1}
+            value={input}
+            disabled={status !== "ready"}
+            onKeyDown={(e) => {
+              if (input.trim() && !isRunning && e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onEnter(input);
+              }
+            }}
+            onChange={(e) => setInput(e.target.value)}
+          />
+          <div className="pb-1 pr-1">
+            {isRunning ? (
+              <button onClick={onInterrupt} className="p-2 bg-white dark:bg-gray-700 text-red-500 rounded-xl shadow-sm hover:scale-105 transition">
+                <StopIcon className="h-6 w-6" />
+              </button>
+            ) : (
+              <button
+                onClick={() => input.trim() && onEnter(input)}
+                disabled={!input.trim() || status !== "ready"}
+                className={`p-2 rounded-xl shadow-sm transition-all ${
+                  input.trim() && status === "ready"
+                  ? "bg-blue-600 text-white hover:scale-105"
+                  : "bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed"
+                }`}
+              >
+                <ArrowRightIcon className="h-6 w-6" />
+              </button>
+            )}
+          </div>
         </div>
+        <p className="text-[10px] text-gray-400 text-center mt-3 tracking-wider">
+          PHIL-3.5 WEB • LOCAL INFERENCE
+        </p>
       </div>
     </div>
   );
